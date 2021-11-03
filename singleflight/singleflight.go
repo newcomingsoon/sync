@@ -97,7 +97,8 @@ func (g *Group) Do(key string, fn func() (interface{}, error)) (v interface{}, e
 		// 等待先前请求的完成,结果存储在call对象中
 		// 如果之前的fn执行已经结束了， 不会阻塞。只有第一次fn进入还没执行完时才会被阻塞
 		// fn执行完后，此时forgotten=false， key在map中被删除。
-		// 但是，已经进来的请求，还是直接返回之前fn得到的call对象保存的结果，注意：此时key已经在map中被删除了
+		// 但是，已经进来的请求，还是直接返回之前fn得到的call对象保存的结果，注意：此时key已经在map中被删除了，但是call对象是没有被回收
+		// 注意： map中内存回收，是不会直接清理之前已经分配的call对象的
 		// 在fn第一次执行完成后，再通过map判断是不存在的，会重新执行对应的fn函数定义，得到新的call对象，新的结果存储在其中。
 		c.wg.Wait()
 		// 判断先前请求的错误类型
@@ -191,8 +192,8 @@ func (g *Group) doCall(c *call, key string, fn func() (interface{}, error)) {
 			if len(c.chans) > 0 {
 				// 启动另一个协程panic
 				go panic(e)
-				// 同时保持该goroutine不退出
-				// 那么该写成的调用栈也能出现在panic产生后显示出来
+				// 阻塞：保持该goroutine不退出
+				// 那么该协程的调用栈也能出现在panic产生后显示出来
 				select {} // Keep this goroutine around so that it will appear in the crash dump.
 			} else {
 				// 直接panic
@@ -203,7 +204,7 @@ func (g *Group) doCall(c *call, key string, fn func() (interface{}, error)) {
 		} else {
 			// Normal return
 			// 通过channel的形式获取请求的返回填入ch中
-			// 如果不是DoChan的形式，那么直接返回
+			// 如果不是DoChan的形式（c.chans 为nil），那么直接返回
 			for _, ch := range c.chans {
 				// 所有后续等待相同的key的结果，不管自定义fn做了什么，都是返回之前请求得到的结果
 				ch <- Result{c.val, c.err, c.dups > 0}

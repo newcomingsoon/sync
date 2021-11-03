@@ -19,6 +19,8 @@ import (
 // Pipeline demonstrates the use of a Group to implement a multi-stage
 // pipeline: a version of the MD5All function with bounded parallelism from
 // https://blog.golang.org/pipelines.
+// 通过errgroup构造task之间的pipeline流程
+// pipeline基本上都是使用channel来数据流转的
 func ExampleGroup_pipeline() {
 	m, err := MD5All(context.Background(), ".")
 	if err != nil {
@@ -46,6 +48,7 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 	paths := make(chan string)
 
 	g.Go(func() error {
+		// 	for path := range paths 能退出，不close会阻塞住
 		defer close(paths)
 		return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -68,6 +71,7 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 	const numDigesters = 20
 	for i := 0; i < numDigesters; i++ {
 		g.Go(func() error {
+			// 阻塞： 直到close(paths)被调用，上一个task结束
 			for path := range paths {
 				data, err := ioutil.ReadFile(path)
 				if err != nil {
@@ -84,10 +88,14 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 	}
 	go func() {
 		g.Wait()
+		// 让for r := range c能退出，不close会阻塞住
 		close(c)
 	}()
 
 	m := make(map[string][md5.Size]byte)
+	// 阻塞： 直到close(c)被调用
+	// 数据pipeline流转： data -> channel: paths -> channel: c -> 存储到map[path][16]byte
+	// channel都是无缓冲的，channel数据发送和接受都是阻塞的， 需要以后台协程的方式启动
 	for r := range c {
 		m[r.path] = r.sum
 	}
