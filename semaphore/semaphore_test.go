@@ -164,6 +164,7 @@ func TestLargeAcquireDoesntStarve(t *testing.T) {
 		}()
 	}
 
+	// 获取不到，或阻塞等待
 	sem.Acquire(ctx, n)
 	running = false
 	sem.Release(n)
